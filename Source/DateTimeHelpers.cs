@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Text.RegularExpressions;
 
 namespace Hillinworks.Utilities.GetTime
 {
@@ -6,6 +7,11 @@ namespace Hillinworks.Utilities.GetTime
 	{
 		public static DateTime Parse(string dateTimeString, out DateTimeMode mode)
 		{
+			Exception UnrecognizableException()
+			{
+				return new ArgumentException("unrecognizable DateTime", nameof(dateTimeString));
+			}
+
 			if (string.IsNullOrWhiteSpace(dateTimeString))
 			{
 				mode = DateTimeMode.Time;
@@ -34,40 +40,128 @@ namespace Hillinworks.Utilities.GetTime
 					return DateTime.Now.AddDays(-1);
 			}
 
-			var words = dateTimeString.Split('-');
 
-			if (words.Length != 2 && words.Length != 3)
+			var match = Regex.Match(dateTimeString, @"^([\+\-])([\d\.]+)(\w+)$");
+			if (match.Success)
 			{
-				throw new ArgumentException("unrecognizable DateTime", nameof(dateTimeString));
-			}
-
-			int factor;
-			switch (words[0].ToLower())
-			{
-				case "next":
-					factor = 1;
-					break;
-				case "previous":
-				case "last":
-					factor = -1;
-					break;
-				default:
-					throw new ArgumentException("unrecognizable DateTime", nameof(dateTimeString));
-			}
-
-			var amount = 1.0;
-			if (words.Length == 3)
-			{
-				if (!double.TryParse(words[1], out amount))
+				int factor;
+				switch (match.Groups[1].Value)
 				{
-					throw new ArgumentException($"unexpected '{words[1]}'", nameof(dateTimeString));
+					case "+":
+						factor = 1;
+						break;
+					case "-":
+						factor = -1;
+						break;
+					default:
+						throw UnrecognizableException();
+				}
+				if (!double.TryParse(match.Groups[2].Value, out var amount))
+				{
+					throw UnrecognizableException();
+				}
+				var unit = match.Groups[3].Value;
+
+				return DateTimeHelpers.GetTimeFromNow(factor, amount, unit, true, out mode);
+			}
+
+			match = Regex.Match(dateTimeString, @"^(next|previous|last)\-(([\d\.]+)(\-)?)?(\w+)$", RegexOptions.IgnoreCase);
+			if (match.Success)
+			{
+				int factor;
+				switch (match.Groups[1].Value.ToLower())
+				{
+					case "next":
+						factor = 1;
+						break;
+					case "previous":
+					case "last":
+						factor = -1;
+						break;
+					default:
+						throw UnrecognizableException();
+				}
+				var amountString = match.Groups[3].Value;
+				var amount = 1.0;
+				if (!string.IsNullOrEmpty(amountString) && !double.TryParse(amountString, out amount))
+				{
+					throw UnrecognizableException();
+				}
+
+				var unit = match.Groups[5].Value;
+
+				return DateTimeHelpers.GetTimeFromNow(factor, amount, unit, string.IsNullOrEmpty(match.Groups[4].Value), out mode);
+			}
+
+			match = Regex.Match(dateTimeString, @"^([\d\.]+)(\-)?(\w+)-(ago|later)$", RegexOptions.IgnoreCase);
+			if (match.Success)
+			{
+				int factor;
+				switch (match.Groups[4].Value.ToLower())
+				{
+					case "later":
+						factor = 1;
+						break;
+					case "ago":
+						factor = -1;
+						break;
+					default:
+						throw UnrecognizableException();
+				}
+				var amountString = match.Groups[1].Value;
+				var amount = 1.0;
+				if (!string.IsNullOrEmpty(amountString) && !double.TryParse(amountString, out amount))
+				{
+					throw UnrecognizableException();
+				}
+
+				var unit = match.Groups[3].Value;
+
+				return DateTimeHelpers.GetTimeFromNow(factor, amount, unit, string.IsNullOrEmpty(match.Groups[2].Value), out mode);
+			}
+
+			throw UnrecognizableException();
+		}
+
+		private static DateTime GetTimeFromNow(int factor, double amount, string unit, bool shortUnit, out DateTimeMode mode)
+		{
+			amount *= factor;
+
+			if (shortUnit)
+			{
+				switch (unit.ToLower())
+				{
+					case "ms":
+						mode = DateTimeMode.Time;
+						return DateTime.Now.AddMilliseconds(amount);
+					case "s":
+						mode = DateTimeMode.Time;
+						return DateTime.Now.AddSeconds(amount);
+					case "min":
+					case "mins":
+					case "m":
+						mode = DateTimeMode.Time;
+						return DateTime.Now.AddMinutes(amount);
+					case "h":
+						mode = DateTimeMode.Time;
+						return DateTime.Now.AddHours(amount);
+					case "d":
+						mode = DateTimeMode.Date;
+						return DateTime.Now.AddDays(amount);
+					case "w":
+						mode = DateTimeMode.Date;
+						return DateTime.Now.AddWeeks(amount);
+					case "yr":
+					case "yrs":
+					case "y":
+						mode = DateTimeMode.Date;
+						return DateTime.Now.AddYears(amount);
+					default:
+						throw new ArgumentException("unrecognizable DateTime");
 				}
 			}
 
-			amount *= factor;
-
-			var unitWord = words[words.Length - 1];
-			switch (unitWord.ToLower())
+			switch (unit.ToLower())
 			{
 				case "millisecond":
 				case "milliseconds":
@@ -121,9 +215,8 @@ namespace Hillinworks.Utilities.GetTime
 					mode = DateTimeMode.Date;
 					return DateTime.Now.AddCenturies(amount);
 				default:
-					throw new ArgumentException("unrecognizable DateTime", nameof(dateTimeString));
+					throw new ArgumentException("unrecognizable DateTime");
 			}
-
 		}
 
 		public static DateTime AddWeeks(this DateTime datetime, double amount)
